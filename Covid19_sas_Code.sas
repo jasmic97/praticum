@@ -1,0 +1,180 @@
+/* COVID-19 Practicum Analysis: Brazos County (2020-2022) */
+/* This script includes data import, cleaning, exploratory analysis, multiple regression models,
+   table generation, and visualization for COVID-19 case data in Brazos County, TX. */
+
+
+/* STEP 1: Import Excel File */
+proc import datafile="C:\YourPath\COVID-19 TRACKER 2020-PRACTICUM.xlsx"
+    out=covid_raw
+    dbms=xlsx
+    replace;
+    sheet="Confirmed";
+    getnames=yes;
+run;
+
+/* STEP 2: Clean and Recode Variables */
+data covid_clean;
+    set covid_raw;
+
+    Age_num = input(Age, best.);
+
+    length AgeGroup_clean $10;
+    if Age_num < 18 then AgeGroup_clean = "0-17";
+    else if 18 <= Age_num <= 24 then AgeGroup_clean = "18-24";
+    else if 25 <= Age_num <= 39 then AgeGroup_clean = "25-39";
+    else if 40 <= Age_num <= 64 then AgeGroup_clean = "40-64";
+    else if Age_num >= 65 then AgeGroup_clean = "65+";
+    else AgeGroup_clean = "Missing";
+
+    if strip(lowcase(Hospitalization)) = "yes" then Hospitalized = 1;
+    else if strip(lowcase(Hospitalization)) = "no" then Hospitalized = 0;
+
+    if strip(lowcase(Death)) = "yes" then Died = 1;
+    else if strip(lowcase(Death)) = "no" then Died = 0;
+
+    if not missing(Travel_History) then Traveled = 1;
+    else Traveled = 0;
+
+    if not missing(Symptoms) then Symptoms_present = 1;
+    else Symptoms_present = 0;
+
+    Sex_clean = upcase(strip(Sex));
+    if Sex_clean not in ("M", "F") then delete;
+
+    Race_clean = strip(Race);
+    City_clean = upcase(strip(City));
+    Zip_clean = strip(Zip_Code);
+
+    keep ID Age_num AgeGroup_clean Sex_clean Race_clean Traveled Symptoms_present Hospitalized Died City_clean Zip_clean;
+run;
+
+data covid_clean;
+    set covid_clean;
+    if cmiss(of _all_) then delete;
+run;
+
+/* STEP 3: Descriptive Statistics */
+proc freq data=covid_clean;
+    tables Hospitalized Died Sex_clean Race_clean AgeGroup_clean Traveled Symptoms_present / missing;
+run;
+
+proc means data=covid_clean n mean std min max maxdec=2;
+    var Age_num;
+run;
+
+/* STEP 4: Linear Regression Example */
+proc reg data=covid_clean;
+    model Age_num = Traveled Symptoms_present;
+    title "Linear Regression: Age Predicted by Travel and Symptoms";
+run;
+quit;
+
+/* STEP 5: Logistic Regression - Hospitalization */
+proc logistic data=covid_clean descending;
+    class AgeGroup_clean(ref='18-24') Sex_clean(ref='M') Race_clean(ref='W') / param=ref;
+    model Hospitalized = AgeGroup_clean Sex_clean Race_clean Traveled Symptoms_present;
+    ods output OddsRatios=OR_Hosp;
+run;
+
+/* STEP 6: Logistic Regression - Death */
+proc logistic data=covid_clean descending;
+    class AgeGroup_clean(ref='18-24') Sex_clean(ref='M') Race_clean(ref='W') / param=ref;
+    model Died = AgeGroup_clean Sex_clean Race_clean Traveled;
+    ods output OddsRatios=OR_Death;
+run;
+
+/* STEP 7: Multinomial Logistic Regression - Example */
+proc logistic data=covid_clean;
+    class AgeGroup_clean(ref='18-24') / param=ref;
+    model Race_clean = AgeGroup_clean Sex_clean Traveled / link=glogit;
+    title "Multinomial Logistic Regression: Race as Outcome";
+run;
+
+/* STEP 8: Poisson Regression - Count Example */
+data poisson_test;
+    set covid_clean;
+    Contact_num = input(Contact, best.);
+run;
+
+proc genmod data=poisson_test;
+    class Sex_clean;
+    model Contact_num = Age_num Sex_clean / dist=poisson link=log;
+    title "Poisson Regression: Number of Contacts by Age and Sex";
+run;
+
+/* STEP 9: Generate Table 1 Summary */
+proc means data=covid_clean n mean std min max maxdec=2;
+    class Hospitalized;
+    var Age_num;
+run;
+
+proc freq data=covid_clean;
+    tables Hospitalized*(Sex_clean Race_clean AgeGroup_clean Traveled Symptoms_present Died) / chisq;
+run;
+
+/* STEP 10: Forest Plot - Hospitalization */
+data OR_Hosp_plot;
+    set OR_Hosp;
+    logOR = OddsRatioEst;
+    logLower = LowerCL;
+    logUpper = UpperCL;
+run;
+
+proc sgplot data=OR_Hosp_plot;
+    title "Figure 1. Adjusted Odds Ratios for Hospitalization Due to COVID-19";
+    highlow y=Effect low=logLower high=logUpper / lineattrs=(thickness=2);
+    scatter y=Effect x=logOR / markerattrs=(symbol=circlefilled size=9);
+    refline 1 / axis=x lineattrs=(pattern=shortdash color=gray);
+    xaxis label="Adjusted Odds Ratio (log scale)" type=log logbase=10;
+    yaxis discreteorder=data;
+run;
+
+/* STEP 11: Forest Plot - Death */
+data OR_Death_plot;
+    set OR_Death;
+    logOR = OddsRatioEst;
+    logLower = LowerCL;
+    logUpper = UpperCL;
+run;
+
+proc sgplot data=OR_Death_plot;
+    title "Figure 2. Adjusted Odds Ratios for Death Due to COVID-19";
+    highlow y=Effect low=logLower high=logUpper / lineattrs=(thickness=2);
+    scatter y=Effect x=logOR / markerattrs=(symbol=trianglefilled size=9 color=red);
+    refline 1 / axis=x lineattrs=(pattern=shortdash color=gray);
+    xaxis label="Adjusted Odds Ratio (log scale)" type=log logbase=10;
+    yaxis discreteorder=data;
+run;
+
+/* STEP 12: Additional Visuals */
+proc sgplot data=covid_clean;
+    title "Figure 3. Age Distribution of COVID-19 Cases";
+    histogram Age_num / binwidth=5 transparency=0.3;
+    density Age_num / type=normal;
+    xaxis label="Age (Years)";
+    yaxis label="Frequency";
+run;
+
+proc sgplot data=covid_clean;
+    title "Figure 4. Hospitalization Status by Race";
+    styleattrs datacolors=(lightskyblue darkorange);
+    vbar Race_clean / group=Hospitalized groupdisplay=stack stat=percent;
+    xaxis label="Race";
+    yaxis label="Percent of Cases";
+    keylegend / location=inside position=topright across=1;
+run;
+
+proc sgplot data=covid_clean;
+    title "Figure 5. Hospitalization Status by Sex";
+    styleattrs datacolors=(mediumslateblue salmon);
+    vbar Sex_clean / group=Hospitalized groupdisplay=cluster stat=percent;
+    xaxis label="Sex";
+    yaxis label="Percent";
+run;
+
+/* STEP 13: Export Cleaned Dataset */
+proc export data=covid_clean
+    outfile="C:\YourPath\covid_clean.xlsx"
+    dbms=xlsx
+    replace;
+run;
