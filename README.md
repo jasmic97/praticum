@@ -46,5 +46,5 @@ To run this project:
 3. Review outputs in the Results Viewer or export to desired formats.
 
 ## 🧾 Author
-This project was completed by [Your Name], MPH Biostatistics Student, as a practicum deliverable.
+This project was completed by Jason Joseph as a practicum deliverable.
 
